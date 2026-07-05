@@ -192,11 +192,14 @@ A libcurl easy-interface program that exercises the server.
     `Content-Type: text/plain` and `X-Example: demo`.
   - `CURLOPT_WRITEFUNCTION` + `CURLOPT_WRITEDATA` to capture the response body
     into a `std::string`.
-  - `curl_easy_perform`, check `CURLcode`, read `CURLINFO_RESPONSE_CODE`.
+  - `curl_easy_perform`, check `CURLcode`, read `CURLINFO_RESPONSE_CODE` and
+    `CURLINFO_TOTAL_TIME_T` (total round-trip time in **microseconds**).
 - **Output:** writes the echoed **response body to stdout** (nothing else on
-  stdout, so it can be piped/compared); logs the HTTP status and any transport
-  error to **stderr**. Cleans up with `curl_slist_free_all` / `curl_easy_cleanup`,
-  wrapped in `curl_global_init` / `curl_global_cleanup` around `main`. Exit code
+  stdout, so it can be piped/compared); logs the HTTP **status code and the
+  request latency in microseconds** — e.g. `HTTP 200 (1234 us)` — plus any
+  transport error, to **stderr**. Cleans up with `curl_slist_free_all` /
+  `curl_easy_cleanup`, wrapped in `curl_global_init` / `curl_global_cleanup`
+  around `main`. Exit code
   is non-zero on transport failure or a non-2xx status.
 - **Convention:** same Apache header + `namespace {}`-local helpers as the
   server; a `WriteCallback` free function for the write callback.
@@ -247,7 +250,8 @@ echo "hello from the libcurl client" | ./build/client/echo_client http://127.0.0
 
 Expected: the client prints the plain-text echo to **stdout** — the request
 line, the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
-`Content-Length`), and the body text — while the `HTTP 200` status is logged to
+`Content-Length`), and the body text — while the `HTTP 200` status and the
+round-trip latency in microseconds (e.g. `HTTP 200 (1234 us)`) are logged to
 **stderr**.
 
 ---
@@ -255,9 +259,9 @@ line, the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
 ## 8. Verification
 
 1. **Build** succeeds (`echo_server`, `echo_client`).
-2. **libcurl client round-trip:** `echo 'hi' | echo_client <url>` — status logged
-   to stderr is `200`; stdout contains the sent `X-Example: demo` header and the
-   exact POST text (`hi`).
+2. **libcurl client round-trip:** `echo 'hi' | echo_client <url>` — stderr logs
+   `HTTP 200 (<n> us)` (status plus microsecond latency); stdout contains the
+   sent `X-Example: demo` header and the exact POST text (`hi`).
 3. **Cross-check with `curl`:**
    `curl -s -X POST -H 'X-Example: demo' --data 'hi' http://127.0.0.1:8080/echo`
    returns the same echo.
