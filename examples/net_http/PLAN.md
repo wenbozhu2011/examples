@@ -177,20 +177,27 @@ hello from the libcurl client
 
 A libcurl easy-interface program that exercises the server.
 
-- **Usage:** `echo_client <url> [body]` — e.g.
-  `echo_client http://127.0.0.1:8080/echo "hello from the libcurl client"`.
+- **Usage:** `echo_client <url>` — reads the POST request **body from stdin** and
+  writes the server's **response body to stdout**, so it composes with pipes and
+  redirection. E.g.:
+  - `echo 'hello from the libcurl client' | ./echo_client http://127.0.0.1:8080/echo`
+  - `./echo_client http://127.0.0.1:8080/echo < message.txt`
 - **libcurl setup:**
-  - `curl_easy_init()`, `CURLOPT_URL`.
-  - `CURLOPT_POST` + `CURLOPT_POSTFIELDS` / `CURLOPT_POSTFIELDSIZE` for the text
-    body.
+  - `curl_easy_init()`, `CURLOPT_URL` (URL taken from `argv[1]`).
+  - Read **all of stdin** into a `std::string`
+    (`std::string body{std::istreambuf_iterator<char>(std::cin), {}};`), then set
+    `CURLOPT_POST` + `CURLOPT_POSTFIELDS` / `CURLOPT_POSTFIELDSIZE` to that buffer
+    (so binary/embedded-NUL bodies are handled via the explicit size).
   - `CURLOPT_HTTPHEADER` (via `curl_slist_append`) to send demo headers, e.g.
     `Content-Type: text/plain` and `X-Example: demo`.
   - `CURLOPT_WRITEFUNCTION` + `CURLOPT_WRITEDATA` to capture the response body
     into a `std::string`.
   - `curl_easy_perform`, check `CURLcode`, read `CURLINFO_RESPONSE_CODE`.
-- **Output:** prints HTTP status and the echoed response body to stdout; cleans
-  up with `curl_slist_free_all` / `curl_easy_cleanup`. Uses
-  `curl_global_init` / `curl_global_cleanup` around `main`.
+- **Output:** writes the echoed **response body to stdout** (nothing else on
+  stdout, so it can be piped/compared); logs the HTTP status and any transport
+  error to **stderr**. Cleans up with `curl_slist_free_all` / `curl_easy_cleanup`,
+  wrapped in `curl_global_init` / `curl_global_cleanup` around `main`. Exit code
+  is non-zero on transport failure or a non-2xx status.
 - **Convention:** same Apache header + `namespace {}`-local helpers as the
   server; a `WriteCallback` free function for the write callback.
 
@@ -213,36 +220,50 @@ A libcurl easy-interface program that exercises the server.
 ## 7. Build & run
 
 ```bash
-# Prerequisites (Debian/Ubuntu):
-sudo apt-get install -y cmake g++ pkg-config libevent-dev zlib1g-dev libcurl4-openssl-dev
+# 1. Prerequisites (Debian/Ubuntu). `git` is required both to clone this
+#    repository and for CMake FetchContent to pull google/net_http at configure
+#    time; the rest are the build toolchain and the C/C++ library dependencies.
+sudo apt-get update
+sudo apt-get install -y git cmake g++ pkg-config \
+    libevent-dev zlib1g-dev libcurl4-openssl-dev
+#    (macOS/Homebrew equivalent: `brew install git cmake pkg-config libevent curl`.)
 
-cd examples/net_http
-cmake -S . -B build            # FetchContent pulls net_http + abseil on first run
+# 2. Download the source from the repo and enter the example directory.
+git clone https://github.com/wenbozhu2011/examples.git
+cd examples/examples/net_http
+
+# 3. Configure and build. The first `cmake` run uses git to fetch
+#    google/net_http (pinned @0381f0c) and Abseil via FetchContent.
+cmake -S . -B build
 cmake --build build -j
 
-# Terminal 1: start the server on port 8080
+# 4. Terminal 1: start the server on port 8080.
 ./build/server/echo_server 8080
 
-# Terminal 2: POST a body via the libcurl client
-./build/client/echo_client http://127.0.0.1:8080/echo "hello from the libcurl client"
+# 5. Terminal 2: POST a body via the libcurl client. The client reads the
+#    request body from stdin and prints the server's response to stdout.
+echo "hello from the libcurl client" | ./build/client/echo_client http://127.0.0.1:8080/echo
 ```
 
-Expected: the client prints `HTTP 200` and the plain-text echo containing the
-request line, the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
-`Content-Length`), and the body text.
+Expected: the client prints the plain-text echo to **stdout** — the request
+line, the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
+`Content-Length`), and the body text — while the `HTTP 200` status is logged to
+**stderr**.
 
 ---
 
 ## 8. Verification
 
 1. **Build** succeeds (`echo_server`, `echo_client`).
-2. **libcurl client round-trip:** response is `200`; body contains the sent
-   `X-Example: demo` header and the exact POST text.
+2. **libcurl client round-trip:** `echo 'hi' | echo_client <url>` — status logged
+   to stderr is `200`; stdout contains the sent `X-Example: demo` header and the
+   exact POST text (`hi`).
 3. **Cross-check with `curl`:**
    `curl -s -X POST -H 'X-Example: demo' --data 'hi' http://127.0.0.1:8080/echo`
    returns the same echo.
-4. **Empty body / GET:** `GET /echo` returns headers with an empty `Body:`
-   section (no crash on `ReadRequestBytes` returning `nullptr` immediately).
+4. **Empty body:** `echo_client <url> < /dev/null` (empty stdin) returns headers
+   with an empty `Body:` section — no crash on `ReadRequestBytes` returning
+   `nullptr` immediately.
 
 ---
 
