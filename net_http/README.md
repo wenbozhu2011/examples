@@ -43,10 +43,13 @@ sudo apt-get install -y git cmake g++ pkg-config \
 
 # Download the source and enter this example directory.
 git clone https://github.com/wenbozhu2011/examples.git
-cd examples/examples/net_http
+cd examples/net_http
 
-# Configure and build.
+# Configure: the first run fetches google/net_http and Abseil via FetchContent,
+# then generates the build system under ./build.
 cmake -S . -B build
+# Compile the net_http library, echo_server, and echo_client (-j builds in
+# parallel).
 cmake --build build -j
 ```
 
@@ -64,11 +67,11 @@ cmake --build build -j
 printf 'hello from the libcurl client\n\n' | ./build/client/echo_client http://127.0.0.1:8080/echo
 ```
 
-Expected: after the empty line, the client prints the plain-text echo to stdout
-— the request line, the headers it sent (`X-Example: demo`, `Content-Type`,
-`Host`, `Content-Length`), and the body text — while the status and latency are
-logged to stderr, e.g. `HTTP 200 (1234 us)`. The loop then waits for the next
-request until Ctrl-D.
+Expected: after the empty line, the client prints the plain-text echo to stdout,
+wrapped in `[]` — the request line, the headers it sent (`X-Example: demo`,
+`Content-Type`, `Host`, `Content-Length`), and the body text — while the status
+and latency are logged to stderr, e.g. `HTTP 200 (1234 us)`. The loop then waits
+for the next request until Ctrl-D.
 
 You can cross-check the server with plain `curl`:
 
