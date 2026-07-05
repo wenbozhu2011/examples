@@ -6,9 +6,10 @@ library, built with **CMake**:
 
 - **`echo_server`** — a `net_http` HTTP server. `POST /echo` returns the request
   method, URI, request headers, and request body as a `text/plain` response.
-- **`echo_client`** — a **libcurl** client. It reads the POST body from **stdin**,
-  writes the server's response to **stdout**, and logs the HTTP status code and
-  round-trip latency (microseconds) to **stderr**.
+- **`echo_client`** — an interactive **libcurl** client. It reads request lines
+  from **stdin** in a loop (an empty line sends the accumulated body as a POST,
+  Ctrl-D quits), writes each response to **stdout**, and logs the HTTP status
+  code and round-trip latency (microseconds) to **stderr**.
 
 See [`PLAN.md`](PLAN.md) for the full design and rationale.
 
@@ -55,14 +56,19 @@ cmake --build build -j
 # Terminal 1: start the server on port 8080.
 ./build/server/echo_server 8080
 
-# Terminal 2: POST a body via the libcurl client (body read from stdin).
-echo "hello from the libcurl client" | ./build/client/echo_client http://127.0.0.1:8080/echo
+# Terminal 2: run the interactive client. Type one or more lines, then press
+# Enter on an empty line to send the request; Ctrl-D quits.
+./build/client/echo_client http://127.0.0.1:8080/echo
+
+# Or drive it non-interactively — the trailing blank line triggers the send:
+printf 'hello from the libcurl client\n\n' | ./build/client/echo_client http://127.0.0.1:8080/echo
 ```
 
-Expected: the client prints the plain-text echo to stdout — the request line,
-the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
-`Content-Length`), and the body text — while the status and latency are logged
-to stderr, e.g. `HTTP 200 (1234 us)`.
+Expected: after the empty line, the client prints the plain-text echo to stdout
+— the request line, the headers it sent (`X-Example: demo`, `Content-Type`,
+`Host`, `Content-Length`), and the body text — while the status and latency are
+logged to stderr, e.g. `HTTP 200 (1234 us)`. The loop then waits for the next
+request until Ctrl-D.
 
 You can cross-check the server with plain `curl`:
 
