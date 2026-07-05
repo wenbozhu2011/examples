@@ -43,7 +43,7 @@ sudo apt-get install -y git cmake g++ pkg-config \
 
 # Download the source and enter this example directory.
 git clone https://github.com/wenbozhu2011/examples.git
-cd examples/examples/net_http
+cd examples/net_http
 
 # Configure and build.
 cmake -S . -B build

@@ -12,7 +12,7 @@ library. It consists of:
   sends the accumulated body as a `POST`, Ctrl-D quits) and prints each echoed
   response.
 
-All artifacts live under `examples/net_http/` in the `wenbozhu2011/examples`
+All artifacts live under `net_http/` in the `wenbozhu2011/examples`
 repository.
 
 ---
@@ -37,7 +37,7 @@ production hardening. The server is single-purpose (an echo endpoint).
 ## 2. Directory layout
 
 ```
-examples/net_http/
+net_http/
 ├── PLAN.md                     # this document
 ├── README.md                   # build + run instructions
 ├── CMakeLists.txt              # top-level project, dependency wiring
@@ -243,7 +243,7 @@ sudo apt-get install -y git cmake g++ pkg-config \
 
 # 2. Download the source from the repo and enter the example directory.
 git clone https://github.com/wenbozhu2011/examples.git
-cd examples/examples/net_http
+cd examples/net_http
 
 # 3. Configure and build. The first `cmake` run uses git to fetch
 #    google/net_http (pinned @0381f0c) and Abseil via FetchContent.
