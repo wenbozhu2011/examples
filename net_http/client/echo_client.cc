@@ -20,10 +20,11 @@ limitations under the License.
 //   - an empty line sends the accumulated body as a POST to the server;
 //   - Ctrl-D (EOF) closes the connection and terminates the client.
 //
-// The response body is written to stdout and the HTTP status code and
-// round-trip latency (microseconds) are logged to stderr, so stdout stays
-// limited to server responses. A single libcurl handle is reused for the whole
-// session, so the underlying HTTP connection is kept alive across requests.
+// Each response body is written to stdout wrapped in [] (so its exact
+// boundaries are visible), and the HTTP status code and round-trip latency
+// (microseconds) are logged to stderr, so stdout stays limited to server
+// responses. A single libcurl handle is reused for the whole session, so the
+// underlying HTTP connection is kept alive across requests.
 //
 // Usage:
 //   echo_client http://127.0.0.1:8080/echo
@@ -46,8 +47,8 @@ size_t WriteCallback(char* ptr, size_t size, size_t nmemb, void* userdata) {
 }
 
 // POSTs `body` over the reused `curl` handle, printing the response to stdout
-// and the status and latency to stderr. Returns 0 on a 2xx response, 1
-// otherwise.
+// (wrapped in []) and the status and latency to stderr. Returns 0 on a 2xx
+// response, 1 otherwise.
 int SendRequest(CURL* curl, const std::string& body) {
   std::string response;
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
@@ -65,7 +66,8 @@ int SendRequest(CURL* curl, const std::string& body) {
   curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
   curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME_T, &latency_us);
 
-  std::cout << response << std::flush;
+  // Wrap the response body in [] so its exact boundaries are visible on stdout.
+  std::cout << '[' << response << ']' << std::endl;
   std::cerr << "HTTP " << status << " (" << latency_us << " us)" << std::endl;
 
   return (status >= 200 && status < 300) ? 0 : 1;

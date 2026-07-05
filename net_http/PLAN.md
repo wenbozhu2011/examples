@@ -204,10 +204,11 @@ against the server.
     `CURLOPT_WRITEDATA` to a fresh response `std::string`, then
     `curl_easy_perform`, check `CURLcode`, and read `CURLINFO_RESPONSE_CODE` and
     `CURLINFO_TOTAL_TIME_T` (round-trip time in **microseconds**).
-- **Output:** writes each echoed **response body to stdout** (nothing else on
-  stdout, so it can be piped/compared); logs the HTTP **status code and the
-  request latency in microseconds** — e.g. `HTTP 200 (1234 us)` — plus any
-  transport error, to **stderr**. Cleans up with `curl_slist_free_all` /
+- **Output:** writes each echoed **response body to stdout**, wrapped in `[]` so
+  its exact boundaries are visible (and nothing else on stdout, so it can be
+  piped/compared); logs the HTTP **status code and the request latency in
+  microseconds** — e.g. `HTTP 200 (1234 us)` — plus any transport error, to
+  **stderr**. Cleans up with `curl_slist_free_all` /
   `curl_easy_cleanup`, wrapped in `curl_global_init` / `curl_global_cleanup`
   around `main`. The exit code reflects the **last** request (non-zero on
   transport failure or a non-2xx status).
@@ -261,11 +262,11 @@ printf 'hello from the libcurl client\n\n' | ./build/client/echo_client http://1
 ```
 
 Expected: after the empty line, the client prints the plain-text echo to
-**stdout** — the request line, the headers it sent (`X-Example: demo`,
-`Content-Type`, `Host`, `Content-Length`), and the body text — while the
-`HTTP 200` status and the round-trip latency in microseconds (e.g.
-`HTTP 200 (1234 us)`) are logged to **stderr**. The loop then waits for the next
-request until Ctrl-D.
+**stdout**, wrapped in `[]` — the request line, the headers it sent
+(`X-Example: demo`, `Content-Type`, `Host`, `Content-Length`), and the body
+text — while the `HTTP 200` status and the round-trip latency in microseconds
+(e.g. `HTTP 200 (1234 us)`) are logged to **stderr**. The loop then waits for
+the next request until Ctrl-D.
 
 ---
 
@@ -274,7 +275,8 @@ request until Ctrl-D.
 1. **Build** succeeds (`echo_server`, `echo_client`).
 2. **Interactive round-trip:** `printf 'hi\n\n' | echo_client <url>` — stderr
    logs `HTTP 200 (<n> us)` (status plus microsecond latency); stdout contains
-   the sent `X-Example: demo` header and the exact POST text (`hi`).
+   the `[]`-wrapped echo with the sent `X-Example: demo` header and the exact
+   POST text (`hi`).
 3. **Multiple requests in one session / keep-alive:**
    `printf 'one\n\ntwo\n\n' | echo_client <url>` sends two requests over the same
    reused connection and prints two echoed responses.
