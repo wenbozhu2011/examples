@@ -7,9 +7,10 @@ library. It consists of:
 - **`echo_server`** — a `net_http` HTTP server that echoes the incoming
   request's HTTP headers and (for `POST`) the request text body back in the
   response body as `text/plain`.
-- **`echo_client`** — a command-line HTTP client, built on **libcurl**, that
-  `POST`s a text body (plus a few custom headers) to the server and prints the
-  echoed response.
+- **`echo_client`** — an interactive command-line HTTP client, built on
+  **libcurl**, that reads request lines from stdin in a loop (an empty line
+  sends the accumulated body as a `POST`, Ctrl-D quits) and prints each echoed
+  response.
 
 All artifacts live under `examples/net_http/` in the `wenbozhu2011/examples`
 repository.
@@ -175,32 +176,41 @@ hello from the libcurl client
 
 ## 5. Client design — `client/echo_client.cc`
 
-A libcurl easy-interface program that exercises the server.
+A libcurl easy-interface program that runs an **interactive read/send loop**
+against the server.
 
-- **Usage:** `echo_client <url>` — reads the POST request **body from stdin** and
-  writes the server's **response body to stdout**, so it composes with pipes and
-  redirection. E.g.:
-  - `echo 'hello from the libcurl client' | ./echo_client http://127.0.0.1:8080/echo`
-  - `./echo_client http://127.0.0.1:8080/echo < message.txt`
-- **libcurl setup:**
-  - `curl_easy_init()`, `CURLOPT_URL` (URL taken from `argv[1]`).
-  - Read **all of stdin** into a `std::string`
-    (`std::string body{std::istreambuf_iterator<char>(std::cin), {}};`), then set
-    `CURLOPT_POST` + `CURLOPT_POSTFIELDS` / `CURLOPT_POSTFIELDSIZE` to that buffer
-    (so binary/embedded-NUL bodies are handled via the explicit size).
-  - `CURLOPT_HTTPHEADER` (via `curl_slist_append`) to send demo headers, e.g.
-    `Content-Type: text/plain` and `X-Example: demo`.
-  - `CURLOPT_WRITEFUNCTION` + `CURLOPT_WRITEDATA` to capture the response body
-    into a `std::string`.
-  - `curl_easy_perform`, check `CURLcode`, read `CURLINFO_RESPONSE_CODE` and
-    `CURLINFO_TOTAL_TIME_T` (total round-trip time in **microseconds**).
-- **Output:** writes the echoed **response body to stdout** (nothing else on
+- **Usage:** `echo_client <url>` — the URL is `argv[1]`; request bodies are read
+  from **stdin** line by line, and each response body is written to **stdout**.
+  - Interactive: `echo_client http://127.0.0.1:8080/echo`, then type lines and
+    press Enter on an empty line to send.
+  - Piped: `printf 'hello\n\n' | echo_client http://127.0.0.1:8080/echo` (the
+    trailing blank line triggers the send).
+- **Interactive loop (`std::getline`):**
+  - Each **non-empty line** is appended to the current request body (with a
+    trailing `\n`).
+  - An **empty line** sends the accumulated body as a `POST`, prints the
+    response, then clears the buffer for the next request.
+  - **Ctrl-D / EOF** closes the connection and terminates the client. A partial
+    (un-sent) buffer is not flushed — the empty line is the send trigger.
+  - When stdin is a TTY (`isatty`), a short usage banner and a `> ` prompt are
+    printed to stderr; piped input runs the same loop without the prompt.
+- **libcurl setup (one reused handle → HTTP keep-alive for the session):**
+  - `curl_easy_init()` once; set `CURLOPT_URL`, `CURLOPT_POST`,
+    `CURLOPT_HTTPHEADER` (demo headers `Content-Type: text/plain`,
+    `X-Example: demo` via `curl_slist_append`), and `CURLOPT_WRITEFUNCTION` up
+    front so the connection is reused across requests.
+  - Per request: set `CURLOPT_POSTFIELDS` / `CURLOPT_POSTFIELDSIZE` to the
+    buffer (explicit size handles binary/embedded-NUL bodies) and
+    `CURLOPT_WRITEDATA` to a fresh response `std::string`, then
+    `curl_easy_perform`, check `CURLcode`, and read `CURLINFO_RESPONSE_CODE` and
+    `CURLINFO_TOTAL_TIME_T` (round-trip time in **microseconds**).
+- **Output:** writes each echoed **response body to stdout** (nothing else on
   stdout, so it can be piped/compared); logs the HTTP **status code and the
   request latency in microseconds** — e.g. `HTTP 200 (1234 us)` — plus any
   transport error, to **stderr**. Cleans up with `curl_slist_free_all` /
   `curl_easy_cleanup`, wrapped in `curl_global_init` / `curl_global_cleanup`
-  around `main`. Exit code
-  is non-zero on transport failure or a non-2xx status.
+  around `main`. The exit code reflects the **last** request (non-zero on
+  transport failure or a non-2xx status).
 - **Convention:** same Apache header + `namespace {}`-local helpers as the
   server; a `WriteCallback` free function for the write callback.
 
@@ -243,31 +253,38 @@ cmake --build build -j
 # 4. Terminal 1: start the server on port 8080.
 ./build/server/echo_server 8080
 
-# 5. Terminal 2: POST a body via the libcurl client. The client reads the
-#    request body from stdin and prints the server's response to stdout.
-echo "hello from the libcurl client" | ./build/client/echo_client http://127.0.0.1:8080/echo
+# 5. Terminal 2: run the interactive client. Type one or more lines, then press
+#    Enter on an empty line to send the request; Ctrl-D quits.
+./build/client/echo_client http://127.0.0.1:8080/echo
+#    Or drive it non-interactively (the trailing blank line triggers the send):
+printf 'hello from the libcurl client\n\n' | ./build/client/echo_client http://127.0.0.1:8080/echo
 ```
 
-Expected: the client prints the plain-text echo to **stdout** — the request
-line, the headers it sent (`X-Example: demo`, `Content-Type`, `Host`,
-`Content-Length`), and the body text — while the `HTTP 200` status and the
-round-trip latency in microseconds (e.g. `HTTP 200 (1234 us)`) are logged to
-**stderr**.
+Expected: after the empty line, the client prints the plain-text echo to
+**stdout** — the request line, the headers it sent (`X-Example: demo`,
+`Content-Type`, `Host`, `Content-Length`), and the body text — while the
+`HTTP 200` status and the round-trip latency in microseconds (e.g.
+`HTTP 200 (1234 us)`) are logged to **stderr**. The loop then waits for the next
+request until Ctrl-D.
 
 ---
 
 ## 8. Verification
 
 1. **Build** succeeds (`echo_server`, `echo_client`).
-2. **libcurl client round-trip:** `echo 'hi' | echo_client <url>` — stderr logs
-   `HTTP 200 (<n> us)` (status plus microsecond latency); stdout contains the
-   sent `X-Example: demo` header and the exact POST text (`hi`).
-3. **Cross-check with `curl`:**
+2. **Interactive round-trip:** `printf 'hi\n\n' | echo_client <url>` — stderr
+   logs `HTTP 200 (<n> us)` (status plus microsecond latency); stdout contains
+   the sent `X-Example: demo` header and the exact POST text (`hi`).
+3. **Multiple requests in one session / keep-alive:**
+   `printf 'one\n\ntwo\n\n' | echo_client <url>` sends two requests over the same
+   reused connection and prints two echoed responses.
+4. **Cross-check with `curl`:**
    `curl -s -X POST -H 'X-Example: demo' --data 'hi' http://127.0.0.1:8080/echo`
    returns the same echo.
-4. **Empty body:** `echo_client <url> < /dev/null` (empty stdin) returns headers
-   with an empty `Body:` section — no crash on `ReadRequestBytes` returning
-   `nullptr` immediately.
+5. **Empty request:** an empty line with no accumulated body (`printf '\n'`)
+   sends an empty `POST` — the server returns headers with an empty `Body:`
+   section, no crash on `ReadRequestBytes` returning `nullptr` immediately.
+6. **Clean exit:** Ctrl-D / EOF terminates the client with no error.
 
 ---
 
