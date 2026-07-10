@@ -1,11 +1,17 @@
-# Builds google/net_http (a Bazel-only project) as a CMake static library.
+# Builds net_http (a Bazel-only project) as a CMake static library.
 #
-# net_http ships no CMake build files, so we fetch the upstream source with
-# FetchContent and compile the handful of translation units required by the
-# server API into `net_http_server`. The source list and link dependencies are
-# derived from the upstream Bazel BUILD graph
+# net_http ships no CMake build files, so we fetch the source with FetchContent
+# and compile the handful of translation units required by the server API into
+# `net_http_server`. The source list and link dependencies are derived from the
+# Bazel BUILD graph
 # (//net_http/server/public:http_server -> evhttp_server -> gzip_zlib,
 #  net_logging, shared_files).
+#
+# Dependency source: the server-side interceptor API used by this example is not
+# yet on upstream google/net_http, so we pin the `server_interceptor` branch of
+# the wenbozhu2011/net_http fork. The compiled source list is identical to
+# upstream; only the interceptor hooks (added within evhttp_request/server) and
+# the httpserver_interface.h / server_request_interface.h headers differ.
 #
 # The following imported targets must already be defined by the caller before
 # including this file: the Abseil `absl::*` targets, ZLIB::ZLIB,
@@ -15,8 +21,9 @@ include(FetchContent)
 
 FetchContent_Declare(
   net_http
-  GIT_REPOSITORY https://github.com/google/net_http.git
-  GIT_TAG        0381f0c286244441a47b08febe3728a68698b954  # pinned upstream commit
+  GIT_REPOSITORY https://github.com/wenbozhu2011/net_http.git
+  # Tip of the `server_interceptor` branch (interceptor API support).
+  GIT_TAG        c56de144656726c5966da4673bac5b307162feb0
 )
 # net_http has no top-level CMakeLists.txt, so MakeAvailable only populates the
 # source tree (no add_subdirectory) and sets ${net_http_SOURCE_DIR}.
