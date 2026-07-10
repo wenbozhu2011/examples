@@ -6,7 +6,8 @@ library. It consists of:
 
 - **`echo_server`** — a `net_http` HTTP server that echoes the incoming
   request's HTTP headers and (for `POST`) the request text body back in the
-  response body as `text/plain`.
+  response body as `text/plain`. A server-side **interceptor** (pre-hook) logs
+  each request's headers to the server's stdout.
 - **`echo_client`** — an interactive command-line HTTP client, built on
   **libcurl**, that reads request lines from stdin in a loop (an empty line
   sends the accumulated body as a `POST`, Ctrl-D quits) and prints each echoed
@@ -22,7 +23,8 @@ repository.
 | Requirement | How it is met |
 | --- | --- |
 | Use the `net_http` library | Server is built directly on `net_http::HTTPServerInterface` / `ServerRequestInterface`. |
-| Depend on **`google/net_http`** (not the fork) | Pulled via CMake `FetchContent` from `https://github.com/google/net_http`, pinned to commit `0381f0c`. |
+| Log request headers via an **interceptor** | A pre-hook `RequestInterceptor` registered with `RegisterRequestInterceptor("/echo", …)` logs headers to stdout, then returns `kContinue`. |
+| Depend on net_http with the **interceptor API** | The interceptor API is not yet on upstream `google/net_http`, so `FetchContent` pins the `server_interceptor` branch of the `wenbozhu2011/net_http` fork (commit `c56de14`). |
 | Echo request **headers** and **POST text body** in the response body | `EchoHandler` walks `request_headers()` and drains `ReadRequestBytes()`, writing them to the response as `text/plain`. |
 | HTTP **client uses libcurl** | `echo_client` uses `libcurl`'s easy interface (`CURLOPT_POSTFIELDS`, `CURLOPT_HTTPHEADER`, `CURLOPT_WRITEFUNCTION`). |
 | Build with **CMake** (not Bazel) | Top-level `CMakeLists.txt`; a `net_http` static library target is compiled from the upstream sources by our own CMake glue (upstream ships only Bazel `BUILD` files). |
@@ -42,7 +44,7 @@ net_http/
 ├── README.md                   # build + run instructions
 ├── CMakeLists.txt              # top-level project, dependency wiring
 ├── cmake/
-│   └── BuildNetHttp.cmake      # FetchContent google/net_http, define net_http_server static lib
+│   └── BuildNetHttp.cmake      # FetchContent net_http, define net_http_server static lib
 ├── server/
 │   ├── CMakeLists.txt
 │   └── echo_server.cc          # net_http echo server
@@ -62,7 +64,7 @@ derived directly from the upstream `BUILD` files.
 
 | Dependency | Role | Acquisition (CMake) |
 | --- | --- | --- |
-| **google/net_http** `@0381f0c` | HTTP server library | `FetchContent_Declare(GIT_REPOSITORY https://github.com/google/net_http GIT_TAG 0381f0c286244441a47b08febe3728a68698b954)` — source only, compiled by `cmake/BuildNetHttp.cmake`. |
+| **net_http** `@c56de14` | HTTP server library (with interceptor API) | `FetchContent_Declare(GIT_REPOSITORY https://github.com/wenbozhu2011/net_http GIT_TAG c56de144656726c5966da4673bac5b307162feb0)` — the `server_interceptor` branch (interceptor API not yet upstream); source only, compiled by `cmake/BuildNetHttp.cmake`. |
 | **libevent** (`>= 2.1.12`) | `net_http` server backend (`evhttp`) | System package (`libevent-dev`) via `pkg-config`: modules `libevent`, `libevent_pthreads`. FetchContent fallback from `libevent/libevent`. |
 | **Abseil** | `net_http` uses `absl::strings`, `memory`, `synchronization`, `base`, `types/span`, `time` | `FetchContent` from `abseil/abseil-cpp`, tag `20240722.0`; or system `find_package(absl)`. |
 | **zlib** | `net_http/compression/gzip_zlib.cc` | `find_package(ZLIB REQUIRED)`. |
@@ -99,9 +101,9 @@ extra + pthreads), `zlib.h`, and `absl/...`.
 ```cmake
 include(FetchContent)
 FetchContent_Declare(net_http
-  GIT_REPOSITORY https://github.com/google/net_http.git
-  GIT_TAG        0381f0c286244441a47b08febe3728a68698b954)
-FetchContent_MakeAvailable(net_http)          # populate only; no upstream CMake
+  GIT_REPOSITORY https://github.com/wenbozhu2011/net_http.git
+  GIT_TAG        c56de144656726c5966da4673bac5b307162feb0)  # server_interceptor branch
+FetchContent_MakeAvailable(net_http)          # populate only; no CMake upstream
 
 add_library(net_http_server STATIC
   ${net_http_SOURCE_DIR}/net_http/public/header_names.cc
@@ -146,16 +148,24 @@ responding as **`text/plain`** and echoing the **POST body**.
      appending each chunk.
   4. `req->WriteResponseString(response)`, `SetContentTypeTEXT(req)`,
      `req->ReplyWithStatus(HTTPStatusCode::OK)`.
+- **Interceptor `LogRequestHeaders(ServerRequestInterface* req)`** — a pre-hook
+  (`RequestInterceptor`) that logs the request line and every header to **stdout**
+  (prefixed `[interceptor]`), then returns `InterceptResult::kContinue` so the
+  handler still runs. Registered per URI via
+  `server->RegisterRequestInterceptor("/echo", LogRequestHeaders, nullptr)` (the
+  post-hook is `nullptr`; a `RegisterRequestInterceptorDispatcher` could apply it
+  to all routes). Pre-hooks run on the executor thread before the handler and
+  must be non-blocking.
 - **Bootstrap `StartServer(port)`:** `ServerOptions` → `AddPort` +
-  `SetExecutor` → `CreateEvHTTPServer` → `RegisterRequestHandler("/echo", …)`
-  → `StartAcceptingRequests()`.
+  `SetExecutor` → `CreateEvHTTPServer` → `RegisterRequestHandler("/echo", …)` →
+  `RegisterRequestInterceptor("/echo", …)` → `StartAcceptingRequests()`.
 - **`main(argc, argv)`:** parse port with `absl::SimpleAtoi`, then
   `server->WaitForTermination()`.
 
 API surface used (all public `net_http`): `HTTPServerInterface`,
 `ServerOptions`, `RequestHandlerOptions`, `EventExecutor`,
 `ServerRequestInterface`, `CreateEvHTTPServer`, `SetContentTypeTEXT`,
-`HTTPStatusCode`.
+`HTTPStatusCode`, `InterceptResult`, `RegisterRequestInterceptor`.
 
 Response body shape:
 
@@ -235,7 +245,7 @@ against the server.
 
 ```bash
 # 1. Prerequisites (Debian/Ubuntu). `git` is required both to clone this
-#    repository and for CMake FetchContent to pull google/net_http at configure
+#    repository and for CMake FetchContent to pull net_http at configure
 #    time; the rest are the build toolchain and the C/C++ library dependencies.
 sudo apt-get update
 sudo apt-get install -y git cmake g++ pkg-config \
@@ -247,7 +257,7 @@ git clone https://github.com/wenbozhu2011/examples.git
 cd examples/net_http
 
 # 3. Configure and build. The first `cmake` run uses git to fetch
-#    google/net_http (pinned @0381f0c) and Abseil via FetchContent.
+#    net_http (server_interceptor branch @c56de14) and Abseil via FetchContent.
 cmake -S . -B build
 cmake --build build -j
 
@@ -268,6 +278,17 @@ text — while the `HTTP 200` status and the round-trip latency in microseconds
 (e.g. `HTTP 200 (1234 us)`) are logged to **stderr**. The loop then waits for
 the next request until Ctrl-D.
 
+On the **server** side, the interceptor prints each request's headers to the
+server's stdout before the handler runs, e.g.:
+
+```
+[interceptor] POST /echo
+[interceptor]   Host: 127.0.0.1:8080
+[interceptor]   Content-Type: text/plain
+[interceptor]   X-Example: demo
+[interceptor]   Content-Length: 3
+```
+
 ---
 
 ## 8. Verification
@@ -277,6 +298,9 @@ the next request until Ctrl-D.
    logs `HTTP 200 (<n> us)` (status plus microsecond latency); stdout contains
    the `[]`-wrapped echo with the sent `X-Example: demo` header and the exact
    POST text (`hi`).
+3. **Interceptor:** the **server** stdout shows the `[interceptor]` header log
+   for each request (request line + every header), while the server's
+   startup/event-loop logging stays on stderr.
 3. **Multiple requests in one session / keep-alive:**
    `printf 'one\n\ntwo\n\n' | echo_client <url>` sends two requests over the same
    reused connection and prints two echoed responses.
@@ -314,7 +338,11 @@ the next request until Ctrl-D.
   `libevent` + `libevent_pthreads` pkg-config modules.
 - **Vendored source list drift:** if a future `net_http` commit adds/removes
   server `.cc` files, `cmake/BuildNetHttp.cmake` must be updated. Pinning to
-  `0381f0c` keeps the list stable.
+  `c56de14` keeps the list stable.
+- **Fork dependency:** the dependency points at the `server_interceptor` branch
+  of the `wenbozhu2011/net_http` fork because the interceptor API is not yet on
+  upstream `google/net_http`. Once it lands upstream, repoint
+  `cmake/BuildNetHttp.cmake` back to `google/net_http` at the merged commit.
 - **Header-only executor reuse:** `fixed_thread_pool.h` is marked `testonly` in
   Bazel but is a plain header; using it here is convenient and dependency-free.
   A local thread pool is a trivial alternative if we prefer not to reach into

@@ -16,6 +16,9 @@ limitations under the License.
 // A multi-threaded HTTP server that echoes the request headers and the request
 // body back to the client as text/plain.
 // URI: /echo
+//
+// A server-side pre-hook interceptor (net_http's interceptor API) logs each
+// request's headers to stdout before the handler runs.
 
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +47,7 @@ using net_http::EventExecutor;
 using net_http::FixedThreadPool;
 using net_http::HTTPServerInterface;
 using net_http::HTTPStatusCode;
+using net_http::InterceptResult;
 using net_http::RequestHandlerOptions;
 using net_http::ServerOptions;
 using net_http::ServerRequestInterface;
@@ -62,6 +66,20 @@ class ThreadPoolExecutor final : public EventExecutor {
  private:
   FixedThreadPool thread_pool_;
 };
+
+// Pre-hook interceptor: logs the request line and every request header to
+// stdout, then returns kContinue so the request handler still runs. Registered
+// per URI via RegisterRequestInterceptor (see StartServer).
+InterceptResult LogRequestHeaders(ServerRequestInterface* req) {
+  std::cout << "[interceptor] " << req->http_method() << " " << req->uri_path()
+            << "\n";
+  for (absl::string_view header : req->request_headers()) {
+    std::cout << "[interceptor]   " << header << ": "
+              << req->GetRequestHeader(header) << "\n";
+  }
+  std::cout << std::flush;
+  return InterceptResult::kContinue;
+}
 
 // Echoes the request line, the request headers, and the request body back to
 // the client as a plain-text response.
@@ -102,6 +120,12 @@ std::unique_ptr<HTTPServerInterface> StartServer(int port, int num_threads) {
 
   RequestHandlerOptions handler_options;
   server->RegisterRequestHandler("/echo", EchoHandler, handler_options);
+
+  // Pre-hook interceptor that logs each /echo request's headers to stdout. The
+  // post-hook is nullptr (pre-only). A RegisterRequestInterceptorDispatcher
+  // could apply the same hook to every route instead of a single URI.
+  server->RegisterRequestInterceptor("/echo", LogRequestHeaders,
+                                     /*response_interceptor=*/nullptr);
 
   if (!server->StartAcceptingRequests()) {
     return nullptr;
